@@ -2,9 +2,14 @@
     "name": "backend",
     "version": "1.0.0",
     "description": "",
+    "private": true,
     "main": "build/app.js",
     "scripts": {
-
+        "build:wasmdev": "asc wasm_src/index.ts -b .tmp/module.wasm -t .tmp/module.wat -O0 --shrinkLevel 0 --debug",
+        "build:wasm": "asc wasm_src/index.ts -b build/module.wasm -O3",
+        "build:ts": "node build.js",
+        "build": "concurrently \"pnpm build:wasm\" \"pnpm build:ts\"",
+        "dev": "concurrently \"chokidar 'wasm_src/**/*.ts' -c 'pnpm build:wasmdev'\" \"tsx watch --watch .tmp/module.wasm src/index.ts\""
     },
     "keywords": [],
     "author": "",
@@ -15,8 +20,9 @@
         "@types/express": "^5.0.3",
         "@types/node": "^24.6.2",
         "as-bind": "^0.8.2",
-        "asbuild": "^0.2.0",
         "assemblyscript": "^0.28.8",
+        "chokidar-cli": "^3.0.0",
+        "concurrently": "^9.2.1",
         "esbuild": "^0.25.10",
         "eslint": "^9.37.0",
         "tsx": "^4.20.6",
