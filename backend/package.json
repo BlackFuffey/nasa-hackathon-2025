@@ -1,0 +1,30 @@
+{
+    "name": "backend",
+    "version": "1.0.0",
+    "description": "",
+    "main": "build/app.js",
+    "scripts": {
+
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "packageManager": "pnpm@10.16.1",
+    "devDependencies": {
+        "@eslint/js": "^9.37.0",
+        "@types/express": "^5.0.3",
+        "@types/node": "^24.6.2",
+        "as-bind": "^0.8.2",
+        "asbuild": "^0.2.0",
+        "assemblyscript": "^0.28.8",
+        "esbuild": "^0.25.10",
+        "eslint": "^9.37.0",
+        "tsx": "^4.20.6",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.45.0"
+    },
+    "dependencies": {
+        "@assemblyscript/loader": "^0.28.8",
+        "express": "^5.1.0"
+    }
+}
