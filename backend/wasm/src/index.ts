@@ -251,7 +251,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     let results = new Array<SimulationFrame>();
 
-    function compute(params: Asteroid, dt: f64): StaticArray<Asteroid> {
+    function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<Asteroid> {
         let rmag = norm(params.pos);
         let alt = (rmag - planetR) / 1000.0; // km altitude
 
@@ -422,7 +422,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
                 spinAxis: newSpinAxis,
                 rotr_radS: newRotRadS,
                 strength_MPa: params.strength_MPa
-            }, dt);
+            }, planet, dt);
             
             const frag2 = compute({
                 id: nextId(),
@@ -434,7 +434,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
                 spinAxis: newSpinAxis,
                 rotr_radS: newRotRadS,
                 strength_MPa: params.strength_MPa
-            }, dt);
+            }, planet, dt);
 
             const result = new StaticArray<Asteroid>(frag1.length + frag2.length);
 
@@ -489,24 +489,24 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
             let Fd = 0.5 * CD * rho * vmag * vmag * Math.pow(m / 2000.0, 2/3);
             let drag = scale(normalize(v), -Fd / m);
             let gravity = scale(normalize(p), -gravityAt({
-                pos: p, eqtgrav_mS2: params.planet.eqtgrav_mS2,
-                axis_m: params.planet.axis_m, 
-                ecc: params.planet.ecc, flat: params.planet.flat
+                pos: p, eqtgrav_mS2: planet.eqtgrav_mS2,
+                axis_m: planet.axis_m, 
+                ecc: planet.ecc, flat: planet.flat
             }))
 
             return add(gravity, drag);
         }
 
-        let k1v = accel(params.pos, params.pos, params.vel, params.mass_kg);
+        let k1v = accel(planet, params.pos, params.pos, params.vel, params.mass_kg);
         let k1r = params.vel;
 
-        let k2v = accel(params.pos, add(params.pos, scale(k1r, dt * 0.5)), add(params.vel, scale(k1v, dt * 0.5)), params.mass_kg);
+        let k2v = accel(planet, params.pos, add(params.pos, scale(k1r, dt * 0.5)), add(params.vel, scale(k1v, dt * 0.5)), params.mass_kg);
         let k2r = add(params.vel, scale(k1v, dt * 0.5));
 
-        let k3v = accel(params.pos, add(params.pos, scale(k2r, dt * 0.5)), add(params.vel, scale(k2v, dt * 0.5)), params.mass_kg);
+        let k3v = accel(planet, params.pos, add(params.pos, scale(k2r, dt * 0.5)), add(params.vel, scale(k2v, dt * 0.5)), params.mass_kg);
         let k3r = add(params.vel, scale(k2v, dt * 0.5));
 
-        let k4v = accel(params.pos, add(params.pos, scale(k3r, dt)), add(params.vel, scale(k3v, dt)), params.mass_kg);
+        let k4v = accel(planet, params.pos, add(params.pos, scale(k3r, dt)), add(params.vel, scale(k3v, dt)), params.mass_kg);
         let k4r = add(params.vel, scale(k3v, dt));
 
         params.vel = add(params.vel, scale(
@@ -515,9 +515,6 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
         params.pos = add(params.pos, scale(
             add(add(k1r, scale(add(k2r, k3r), 2.0)), k4r), dt / 6.0
         ));
-
-        params.vel = integ.vel;
-        params.pos = integ.pos;
 
         // Rotation update
         params.rot_rad += params.rotr_radS * dt;
@@ -533,9 +530,12 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
         let state = new StaticArray<FragmentState>(keys.length);
 
         for (let i = 0; i < keys.length; i++) {
-            let result = compute(frags.get(keys[i]), dt)
+            let result = compute(frags.get(keys[i]), params.planet, dt)
             frags.delete(keys[i]);
-            result.forEach(frag => frags.set(frag.id, frag));
+
+            for (let j = 0; j < result.length; j++) {
+                frags.set(result[i].id, result[i]);
+            }
         }
 
         keys = frags.keys();
