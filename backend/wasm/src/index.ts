@@ -251,7 +251,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     let results = new Array<SimulationFrame>();
 
-    function compute(params: Asteroid, dt: f64): Asteroid[] {
+    function compute(params: Asteroid, dt: f64): StaticArray<Asteroid> {
         let rmag = norm(params.pos);
         let alt = (rmag - planetR) / 1000.0; // km altitude
 
@@ -436,7 +436,17 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
                 strength_MPa: params.strength_MPa
             }, dt);
 
-            const result = 
+            const result = new StaticArray<Asteroid>(frag1.length + frag2.length);
+
+            for (let i = 0; i < frag1.length; i++) {
+                result[i] = frag1[i];
+            }
+
+            for (let i = 0; i < frag2.length; i++) {
+                result[frag1.length + 1] = frag2[i];
+            }
+
+            return result;
         }
 
         // Adjust params.shape (account for rotation)
