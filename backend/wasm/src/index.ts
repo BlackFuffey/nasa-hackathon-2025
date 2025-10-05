@@ -1,20 +1,30 @@
 // Types
-type Vec3 = { x: f64, y: f64, z: f64 };
+
+@unmanaged
+class Vec3 { 
+    x!: f64;
+    y!: f64;
+    z!: f64;
+}
 
 type Mesh3D = {
     vertices: StaticArray<Vec3>,
     faces: StaticArray<{ 0: i32, 1: i32, 2: i32 }>
 }
 
-type State = {
-    id: i32,
-    origin: Vec3,
-    rot: f64,
-    spinAxis: Vec3,
-    shape: Mesh3D
+type Simulation = {
+    t: i32,
+    state: {
+        id: i32,
+        origin: Vec3,
+        rot_rad: f64,
+        spinAxis: Vec3,
+        shape: Mesh3D
+    }[]
 }[]
 
 type Asteroid = {
+    id: i32,
     mass_kg: f64, shape: Mesh3D,
     rotr_radS: f64, rot_rad: f64, spinAxis: Vec3, 
     pos: Vec3, vel: Vec3
@@ -150,13 +160,16 @@ export function meteorsim(params: {
         spinAxis: Vec3, shape: Mesh3D
     },
     resol_ms: i32
-}): State[] {
+}): Simulation {
 
     const dt = params.resol_ms as f64 / 1000.0; // timestep in seconds
     const planetR = params.planet.radius;
 
     let { pos, vel } = keplerToCartesian({ mu: params.planet.mu, orbital: params.orbital });
-    
+
+    let fragId = 0;
+    function nextId() { return fragId++; }
+
     let frags: Asteroid[] = [{
         rotr_radS: params.asteroid.rotr_radS,
         spinAxis: params.asteroid.spinAxis,
@@ -165,12 +178,14 @@ export function meteorsim(params: {
         mass_kg: params.asteroid.mass_kg,
         shape: params.asteroid.shape,
 
-        pos, vel
+        pos, vel,
+
+        id: nextId()
     }]
 
     let t: f64 = 0.0;
 
-    let results = new Array<State>();
+    let results: Simulation = [];
 
     // runge-kutta 4th order integration
     function rk4Step(pos: Vec3, vel: Vec3, m: f64, dt: f64): { pos: Vec3, vel: Vec3 } {
@@ -215,23 +230,34 @@ export function meteorsim(params: {
         return { pos: newPos, vel: newVel };
     }
 
-
-    function integrate({ rot_rad, mass_kg, pos, vel, shape, spinAxis, rotr_radS}: Asteroid) {
+    function integrate({ id, rot_rad, mass_kg, pos, vel, shape, spinAxis, rotr_radS }: Asteroid): Asteroid[] {
         let rmag = norm(pos);
         let alt = (rmag - planetR) / 1000.0; // km altitude
 
-        if (alt < 0.0) break; // ground impact
-        if (mass_kg < 1.0) break;   // burned up
+        if (alt < 0.0) return []; // ground impact
+        if (mass_kg < 1.0) return [];   // burned up
 
         // Atmosphere
         let rho = airDensity(alt);
         let vmag = norm(vel);
 
         // Mass loss
+        let massPrev = mass_kg;
+
         let heatFlux = 0.5 * rho * vmag * vmag * vmag;
         let dm = -heatFlux * 1e-8 * dt; // tuning coefficient
 
         mass_kg = Math.max(0.0, mass_kg + dm);
+
+        // Adjust shape
+        const dir = normalize(vel);
+
+        for (let i = 0; i < shape.vertices.length; i++) {
+            const v = shape.vertices[i];
+            // bias shrinkage slightly toward direction of flight (erosion asymmetry)
+            const bias = 1.0 - 0.05 * dot(normalize(v), dir); // 5% faster erosion on leading side
+            shape.vertices[i] = scale(v, Math.pow(mass_kg/massPrev, 1.0/3.0) * bias);
+        }
 
         // Integrate
         const integ = rk4Step(pos, vel, mass_kg, dt);
@@ -241,49 +267,27 @@ export function meteorsim(params: {
         // Rotation update
         rot_rad += rotr_radS * dt;
         if (rot_rad > 2.0*Math.PI) rot_rad -= 2.0*Math.PI;
-        
-        
 
+        return [{ id, rot_rad, mass_kg, pos, vel, shape, spinAxis, rotr_radS }];
     }
 
     // Integrate until hit ground or burn-up
     for (let step = 0; step < 200000; step++) {
-        let rmag = norm(pos);
-        let alt = (rmag - planetR) / 1000.0; // km altitude
 
-        if (alt < 0.0) break; // ground impact
-        if (m < 1.0) break;   // burned up
-
-        // Atmosphere
-        let rho = airDensity(alt);
-        let vmag = norm(vel);
-
-        // Mass loss
-        let heatFlux = 0.5 * rho * vmag * vmag * vmag;
-        let dm = -heatFlux * 1e-8 * dt; // tuning coefficient
-
-        m = Math.max(0.0, m + dm);
-
-        // Integrate
-        const integ = rk4Step(pos, vel, m, dt);
-        vel = integ.vel;
-        pos = integ.pos;
-
-        // Rotation update
-        rot += params.asteroid.rotr_radS * dt;
-        if (rot > 2.0*Math.PI) rot -= 2.0*Math.PI;
-
-        // Record every Nth state for memory
-        if (step % 10 == 0) {
-            let s: State = [{
-                id: 0,
-                origin: pos,
-                rot,
-                spinAxis: params.asteroid.spinAxis,
-                shape: params.asteroid.shape
-            }];
-            results.push(s);
+        for (let i = 0; i < frags.length; i++) {
+            integrate(frags[i])
         }
+        
+        results.push({
+            t: (t * 1000) as i32,
+            state: frags.map(frag => ({
+                id: frag.id,
+                origin: frag.pos,
+                rot_rad: frag.rot_rad,
+                spinAxis: frag.spinAxis,
+                shape: frag.shape
+            }))
+        })
 
         t += dt;
     }
