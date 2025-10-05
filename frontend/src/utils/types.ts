@@ -76,6 +76,7 @@ export interface SimpleGlobeProps {
   simulationMode?: boolean;
   impacts?: MeteorImpact[];
   centerOnLocation?: Location;
+  simulationResult?: any[];
 }
 
 export interface GlobeSidePanelProps {

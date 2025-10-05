@@ -18,6 +18,8 @@ function App() {
   const [centerOnLocation, setCenterOnLocation] = useState<Location | undefined>();
   const [selectedAsteroid, setSelectedAsteroid] = useState<NeoAsteroid | null>(null);
   const [asteroidSuccessMessage, setAsteroidSuccessMessage] = useState<string | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationResult, setSimulationResult] = useState<any[] | undefined>(undefined); // Stores backend result
 
   const handleLocationClick = useCallback(async (location: Location) => {
     setSelectedLocation(location);
@@ -75,20 +77,60 @@ function App() {
   }, []);
 
   const asteroidSelectorEnabled = !!selectedCountry || !!selectedLocation;
+
   const preparedData =
     selectedAsteroid && selectedCountry && selectedLocation
       ? {
-        asteroid: selectedAsteroid,
-        impactCoordinates: { lat: selectedLocation.lat, lng: selectedLocation.lng },
-        country: selectedCountry,
-      }
+          asteroid: selectedAsteroid,
+          impactCoordinates: { lat: selectedLocation.lat, lng: selectedLocation.lng },
+          country: selectedCountry,
+        }
       : null;
 
   const handleAsteroidSelect = (asteroid: NeoAsteroid | null) => {
     setSelectedAsteroid(asteroid);
     if (asteroid) {
       setAsteroidSuccessMessage(`Asteroid "${asteroid.name}" selected!`);
-      setTimeout(() => setAsteroidSuccessMessage(null), 2400); // hide after 2.4s
+      setTimeout(() => setAsteroidSuccessMessage(null), 2400);
+    }
+  };
+
+  // 🔥 Simulate Impact with Backend
+  const handleRunSimulation = async () => {
+    if (!selectedLocation || !selectedAsteroid) return;
+
+    setIsSimulating(true);
+    try {
+      const diameter = selectedAsteroid.estimated_diameter.meters.estimated_diameter_max;
+      const velocity = parseFloat(selectedAsteroid.close_approach_data[0]?.relative_velocity?.kilometers_per_second || "10");
+      const strength_MPa = selectedAsteroid.is_potentially_hazardous_asteroid ? 0.5 : 0.1;
+
+      const response = await fetch('http://localhost:5000/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lat: selectedLocation.lat,
+          lng: selectedLocation.lng,
+          diameter_m: diameter,
+          velocity_kms: velocity,
+          strength_MPa,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Simulation failed');
+      }
+
+      const result = await response.json();
+      setSimulationResult(result ?? undefined);
+      console.log('✅ Simulation complete:', result.length, 'steps');
+      console.log('💥 Fragments at impact:', result.at(-1)?.state.length);
+    } catch (err: any) {
+      console.error('❌ Simulation failed:', err.message);
+      alert('Simulation failed: ' + err.message);
+    } finally {
+      setIsSimulating(false);
     }
   };
 
@@ -116,6 +158,7 @@ function App() {
               simulationMode={simulationMode}
               impacts={impacts}
               centerOnLocation={centerOnLocation}
+              simulationResult={simulationResult} // Pass to globe if you want to visualize
             />
           </main>
           <div className="App-sidebar">
@@ -127,16 +170,19 @@ function App() {
           </div>
         </div>
       </div>
+
       <CountryInfoModal
         isOpen={showModal}
         onClose={handleCloseModal}
         location={selectedLocation}
         country={selectedCountry}
       />
-      {preparedData && (
+
+      {/* 🔘 Show "Simulate" only after asteroid selected */}
+      {preparedData && !simulationResult && (
         <button
-          className="submit-impact-btn"
-          onClick={() => alert("Submit: " + JSON.stringify(preparedData))}
+          onClick={handleRunSimulation}
+          disabled={isSimulating}
           style={{
             position: "fixed",
             bottom: "20px",
@@ -151,10 +197,11 @@ function App() {
             boxShadow: "0 2px 14px #37f3ff22",
           }}
         >
-          Calculate Impact!
+          {isSimulating ? "Running..." : "Simulate Impact"}
         </button>
       )}
 
+      {/* 🎉 Success message */}
       {asteroidSuccessMessage && (
         <div style={{
           position: "fixed",

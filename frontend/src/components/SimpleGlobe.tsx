@@ -8,7 +8,8 @@ const SimpleGlobe: React.FC<SimpleGlobeProps> = ({
   onLocationClick,
   simulationMode = false,
   impacts = [],
-  centerOnLocation
+  centerOnLocation,
+  simulationResult
 }) => {
   const globeRef = useRef<HTMLDivElement>(null);
   const globeInstance = useRef<any>(null);
@@ -168,6 +169,39 @@ const SimpleGlobe: React.FC<SimpleGlobeProps> = ({
       }, 1000); // 1 second animation
     }
   }, [centerOnLocation]);
+
+  useEffect(() => {
+  if (globeInstance.current && simulationResult) {
+    // Clear previous arcs
+    globeInstance.current.arcsData([]);
+
+    // Group by fragment ID
+    const fragmentMap = new Map<number, { lat: number; lng: number; t_ms: number }[]>();
+
+    simulationResult.forEach(step => {
+      step.state.forEach((frag: any) => {
+        const lat = Math.asin(frag.origin.z / 6.371e6) * 180 / Math.PI;
+        const lng = Math.atan2(frag.origin.y, frag.origin.x) * 180 / Math.PI;
+        if (!fragmentMap.has(frag.id)) fragmentMap.set(frag.id, []);
+        fragmentMap.get(frag.id)!.push({ lat, lng, t_ms: step.t_ms });
+      });
+    });
+
+    // Add arc for each fragment
+    fragmentMap.forEach((trail, id) => {
+      globeInstance.current
+        .arcsData([trail])
+        .arcStartLat(() => trail[0].lat)
+        .arcEndLat((d: any) => d.lat)
+        .arcStartLng(() => trail[0].lng)
+        .arcEndLng((d: any) => d.lng)
+        .arcStroke(() => 0.5)
+        .arcAltitude(() => 0.01)
+        .arcColor(() => id === 0 ? '#ff6b6b' : '#ffd93d'); // main = red, fragments = yellow
+    });
+  }
+}, [simulationResult]);
+
 
   return (
     <div 
