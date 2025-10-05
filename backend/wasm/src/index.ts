@@ -7,9 +7,9 @@ class Vec3 {
 }
 
 class i32Vec3 { 
-    x!: f64;
-    y!: f64;
-    z!: f64;
+    x!: i32;
+    y!: i32;
+    z!: i32;
 }
 
 class Mat3x3 {
@@ -253,7 +253,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<Asteroid> {
         let rmag = norm(params.pos);
-        let alt = (rmag - planetR) / 1000.0; // km altitude
+        let alt = (rmag - planet.radius) / 1000.0; // km altitude
 
         if (alt < 0.0) return []; // ground impact
         if (params.mass_kg < 1.0) return [];   // burned up
@@ -412,7 +412,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
             for (let i = 0; i < fTriA.length; i++) fA.push(fTriA[i]);
             for (let i = 0; i < fTriB.length; i++) fB.push(fTriB[i]);
 
-            const frag1 = compute({
+            const frag1: StaticArray<Asteroid> = compute({
                 id: nextId(),
                 rot_rad: 0.0,
                 mass_kg: mass1,
@@ -424,7 +424,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
                 strength_MPa: params.strength_MPa
             }, planet, dt);
             
-            const frag2 = compute({
+            const frag2: StaticArray<Asteroid> = compute({
                 id: nextId(),
                 rot_rad: 0.0,
                 mass_kg: mass2,
