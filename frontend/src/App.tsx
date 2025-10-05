@@ -1,11 +1,13 @@
-import React, { useState, useCallback } from 'react';
-import SimpleGlobe from './components/SimpleGlobe';
-import GlobeSidePanel from './components/GlobeSidePanel';
-import CountryInfoModal from './components/CountryInfoModal';
-import { Location, Country, MeteorImpact } from './utils/types';
-import { SAMPLE_COUNTRIES } from './utils/geoUtils';
-import { reverseGeocode } from './utils/revgeo';
-import './App.css';
+import React, { useState, useCallback } from "react";
+import SimpleGlobe from "./components/SimpleGlobe";
+import GlobeSidePanel from "./components/GlobeSidePanel";
+import CountryInfoModal from "./components/CountryInfoModal";
+import { Location, Country, MeteorImpact } from "./utils/types";
+import { SAMPLE_COUNTRIES } from "./utils/geoUtils";
+import { reverseGeocode } from "./utils/revgeo";
+import "./App.css";
+import { AsteroidPanel } from "./components/AsteroidPanel";
+import { NeoAsteroid } from "./data/fetch";
 
 function App() {
   const [selectedLocation, setSelectedLocation] = useState<Location | undefined>();
@@ -14,65 +16,27 @@ function App() {
   const [impacts, setImpacts] = useState<MeteorImpact[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [centerOnLocation, setCenterOnLocation] = useState<Location | undefined>();
+  const [selectedAsteroid, setSelectedAsteroid] = useState<NeoAsteroid | null>(null);
+  const [asteroidSuccessMessage, setAsteroidSuccessMessage] = useState<string | null>(null);
 
   const handleLocationClick = useCallback(async (location: Location) => {
-    console.log('🎯 ===== LOCATION CLICKED IN APP =====');
-    console.log('🎯 Received location:', location);
-    console.log('🎯 Location type:', typeof location);
-    console.log('🎯 Location lat:', location.lat, 'type:', typeof location.lat);
-    console.log('🎯 Location lng:', location.lng, 'type:', typeof location.lng);
-    
-    // Validate coordinates
-    if (typeof location.lat !== 'number' || typeof location.lng !== 'number' || 
-        isNaN(location.lat) || isNaN(location.lng)) {
-      console.error('❌ Invalid coordinates received:', location);
-      return;
-    }
-    
-    console.log('✅ Coordinates are valid, proceeding...');
     setSelectedLocation(location);
-    
-    // Try to get more detailed location info
-    console.log('🔍 Attempting reverse geocoding...');
     const detailedLocation = await reverseGeocode(location.lat, location.lng);
     if (detailedLocation) {
-      console.log('✅ Detailed location from API:', detailedLocation);
-      // Merge API data with original coordinates to preserve clicked location
-      const mergedLocation = {
-        ...detailedLocation,
-        lat: location.lat,  // Keep original clicked coordinates
-        lng: location.lng   // Keep original clicked coordinates
-      };
-      setSelectedLocation(mergedLocation);
-    } else {
-      console.log('⚠️ No detailed location from API');
-      // Keep original location if API fails
-      setSelectedLocation(location);
+      setSelectedLocation({ ...detailedLocation, lat: location.lat, lng: location.lng });
     }
-
-    // Find matching country using multiple methods
-    console.log('🔍 Looking for matching country...');
     let country: Country | null = null;
-    let closestCountry: Country | null = null;
-    let closestDistance = Infinity;
-    
-    // Method 1: Exact name match from API
     if (detailedLocation?.country) {
-      country = SAMPLE_COUNTRIES.find(c => 
-        c.name.toLowerCase() === detailedLocation.country!.toLowerCase()
+      country = SAMPLE_COUNTRIES.find(
+        (c) => c.name.toLowerCase() === detailedLocation.country!.toLowerCase()
       ) || null;
-      if (country) {
-        console.log('✅ Method 1 - Found by API country name:', country.name);
-      }
     }
-    
-    // Method 2: Find closest country by coordinates
     if (!country) {
-      console.log('🔍 Method 2 - Finding closest country by coordinates...');
-      
+      let closestCountry: Country | null = null;
+      let closestDistance = Infinity;
       SAMPLE_COUNTRIES.forEach((c: Country) => {
         const distance = Math.sqrt(
-          Math.pow(c.coordinates.lat - location.lat, 2) + 
+          Math.pow(c.coordinates.lat - location.lat, 2) +
           Math.pow(c.coordinates.lng - location.lng, 2)
         );
         if (distance < closestDistance) {
@@ -80,114 +44,136 @@ function App() {
           closestCountry = c;
         }
       });
-      
-      if (closestCountry && closestDistance < 50) { // Within 50 degrees
+      if (closestCountry && closestDistance < 50) {
         country = closestCountry;
-        console.log('✅ Method 2 - Found closest country:', (closestCountry as Country).name, 'Distance:', closestDistance);
       }
     }
-    
-    // Method 3: Check if coordinates are in known regions
     if (!country) {
-      console.log('🔍 Method 3 - Checking known regions...');
       const { lat, lng } = location;
-      
-      // North America
       if (lat >= 15 && lat <= 85 && lng >= -180 && lng <= -50) {
-        country = SAMPLE_COUNTRIES.find(c => c.name === 'United States') || null;
-        console.log('✅ Method 3 - North America region, using US as default');
-      }
-      // Europe
-      else if (lat >= 35 && lat <= 70 && lng >= -10 && lng <= 40) {
-        country = SAMPLE_COUNTRIES.find(c => c.name === 'Germany') || null;
-        console.log('✅ Method 3 - Europe region, using Germany as default');
-      }
-      // Asia
-      else if (lat >= 5 && lat <= 55 && lng >= 70 && lng <= 180) {
-        country = SAMPLE_COUNTRIES.find(c => c.name === 'China') || null;
-        console.log('✅ Method 3 - Asia region, using China as default');
-      }
-      // South America
-      else if (lat >= -60 && lat <= 15 && lng >= -85 && lng <= -30) {
-        country = SAMPLE_COUNTRIES.find(c => c.name === 'Brazil') || null;
-        console.log('✅ Method 3 - South America region, using Brazil as default');
+        country = SAMPLE_COUNTRIES.find(c => c.name === "United States") || null;
+      } else if (lat >= 35 && lat <= 70 && lng >= -10 && lng <= 40) {
+        country = SAMPLE_COUNTRIES.find(c => c.name === "Germany") || null;
+      } else if (lat >= 5 && lat <= 55 && lng >= 70 && lng <= 180) {
+        country = SAMPLE_COUNTRIES.find(c => c.name === "China") || null;
+      } else if (lat >= -60 && lat <= 15 && lng >= -85 && lng <= -30) {
+        country = SAMPLE_COUNTRIES.find(c => c.name === "Brazil") || null;
       }
     }
-    
-    if (country) {
-      console.log('✅ Found matching country:', country.name);
-      setSelectedCountry(country);
-    } else {
-      console.log('⚠️ No matching country found for coordinates:', location);
-    }
-
-    // Show modal
-    console.log('📱 Showing modal...');
+    if (country) setSelectedCountry(country);
     setShowModal(true);
-    console.log('🎯 ===== LOCATION CLICK HANDLER COMPLETE =====');
   }, []);
 
-  const handleToggleSimulation = useCallback(() => {
-    setSimulationMode(!simulationMode);
-  }, [simulationMode]);
-
-  const handleClearImpacts = useCallback(() => {
-    setImpacts([]);
-  }, []);
-
-  const handleResetView = useCallback(() => {
-    // This would reset the globe view - implementation depends on globe instance
-    console.log('Reset view clicked');
-  }, []);
-
-  const handleCloseModal = useCallback(() => {
-    setShowModal(false);
-  }, []);
-
+  const handleToggleSimulation = useCallback(() => setSimulationMode((prev) => !prev), []);
+  const handleClearImpacts = useCallback(() => setImpacts([]), []);
+  const handleResetView = useCallback(() => setCenterOnLocation(undefined), []);
+  const handleCloseModal = useCallback(() => setShowModal(false), []);
   const handleSearchCountry = useCallback((country: Country) => {
-    console.log('Searching for country:', country);
     setSelectedCountry(country);
     setSelectedLocation(country.coordinates);
     setCenterOnLocation(country.coordinates);
   }, []);
 
+  const asteroidSelectorEnabled = !!selectedCountry || !!selectedLocation;
+  const preparedData =
+    selectedAsteroid && selectedCountry && selectedLocation
+      ? {
+        asteroid: selectedAsteroid,
+        impactCoordinates: { lat: selectedLocation.lat, lng: selectedLocation.lng },
+        country: selectedCountry,
+      }
+      : null;
+
+  const handleAsteroidSelect = (asteroid: NeoAsteroid | null) => {
+    setSelectedAsteroid(asteroid);
+    if (asteroid) {
+      setAsteroidSuccessMessage(`Asteroid "${asteroid.name}" selected!`);
+      setTimeout(() => setAsteroidSuccessMessage(null), 2400); // hide after 2.4s
+    }
+  };
+
   return (
     <div className="App">
-      <header className="App-header">
-        <h1>NASA Space Apps 2025 - Meteor Impact Simulator</h1>
-        <p>Interactive 3D Globe for Meteor Impact Analysis</p>
-      </header>
-      
-      <div className="App-content">
-        <main className="App-main">
-          <SimpleGlobe 
-            width={900} 
-            height={700} 
-            onLocationClick={handleLocationClick}
+      <div className="App-layout">
+        <div className="App-sidepanel">
+          <GlobeSidePanel
+            selectedLocation={selectedLocation}
+            selectedCountry={selectedCountry}
             simulationMode={simulationMode}
+            onToggleSimulation={handleToggleSimulation}
+            onClearImpacts={handleClearImpacts}
+            onResetView={handleResetView}
+            onSearchCountry={handleSearchCountry}
             impacts={impacts}
-            centerOnLocation={centerOnLocation}
           />
-        </main>
-        
-        <GlobeSidePanel
-          selectedLocation={selectedLocation}
-          selectedCountry={selectedCountry}
-          simulationMode={simulationMode}
-          onToggleSimulation={handleToggleSimulation}
-          onClearImpacts={handleClearImpacts}
-          onResetView={handleResetView}
-          onSearchCountry={handleSearchCountry}
-          impacts={impacts}
-        />
+        </div>
+        <div className="App-dashboard">
+          <main className="App-main">
+            <SimpleGlobe
+              width={800}
+              height={600}
+              onLocationClick={handleLocationClick}
+              simulationMode={simulationMode}
+              impacts={impacts}
+              centerOnLocation={centerOnLocation}
+            />
+          </main>
+          <div className="App-sidebar">
+            <AsteroidPanel
+              onSelect={handleAsteroidSelect}
+              selected={selectedAsteroid}
+              disabled={!asteroidSelectorEnabled}
+            />
+          </div>
+        </div>
       </div>
-
       <CountryInfoModal
         isOpen={showModal}
         onClose={handleCloseModal}
         location={selectedLocation}
         country={selectedCountry}
       />
+      {preparedData && (
+        <button
+          className="submit-impact-btn"
+          onClick={() => alert("Submit: " + JSON.stringify(preparedData))}
+          style={{
+            position: "fixed",
+            bottom: "20px",
+            right: "40px",
+            padding: "12px 20px",
+            background: "#27c3fc",
+            color: "#001a2c",
+            borderRadius: "10px",
+            fontWeight: "bold",
+            border: "none",
+            cursor: "pointer",
+            boxShadow: "0 2px 14px #37f3ff22",
+          }}
+        >
+          Calculate Impact!
+        </button>
+      )}
+
+      {asteroidSuccessMessage && (
+        <div style={{
+          position: "fixed",
+          bottom: "35px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#18ff9e",
+          color: "#003b27",
+          padding: "16px 32px",
+          fontWeight: "bold",
+          borderRadius: "10px",
+          fontSize: "1.1rem",
+          boxShadow: "0 4px 24px #0fffc150",
+          zIndex: 99999,
+          transition: "opacity 0.4s"
+        }}>
+          {asteroidSuccessMessage}
+        </div>
+      )}
     </div>
   );
 }

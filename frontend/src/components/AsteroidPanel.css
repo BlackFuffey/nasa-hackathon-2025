@@ -1,0 +1,98 @@
+.asteroid-panel {
+  width: 320px;
+  min-width: 260px;
+  max-width: 350px;
+  height: 100vh;
+  background: #090d13;
+  color: #e6f0ff;
+  border-right: 2px solid #27c3fc44;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 24px 0;
+  overflow: hidden;
+}
+
+.panel-title {
+  padding: 22px 0 10px 0;
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: bold;
+  text-align: center;
+  letter-spacing: 1px;
+  color: #fff;
+}
+
+.search-box {
+  margin: 0 16px 14px 16px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid #27c3fc;
+  background: #212c3b;
+  color: #d7edfc;
+  outline: none;
+  width: calc(100% - 32px);
+  font-size: 1rem;
+}
+
+.asteroid-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 12px;
+}
+
+.asteroid-card {
+  background: linear-gradient(120deg, #112033 70%, #0d1234 100%);
+  margin-bottom: 16px;
+  padding: 15px 14px 10px 14px;
+  border-radius: 13px;
+  border: 1px solid #28afe670;
+  box-shadow: 0 4px 18px rgba(39,195,252,0.10);
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.asteroid-card:hover {
+  border-color: #36e2ff;
+  box-shadow: 0 6px 20px #22f3ff15;
+  background: #131d33;
+}
+
+.asteroid-title {
+  font-weight: bold;
+  color: #57d0ff;
+  font-size: 1.06rem;
+  margin-bottom: 3px;
+}
+
+.hazard {
+  color: #ffd25a;
+  font-weight: bold;
+  font-size: 1em;
+}
+.safe {
+  color: #74ed7b;
+  font-weight: bold;
+  font-size: 1em;
+}
+
+.selected-card {
+  margin: 30px 16px 0 16px;
+  border-color: #b2f6ff;
+  background: linear-gradient(120deg, #153651 70%, #08283e 100%);
+  box-shadow: 0 4px 24px #3ef2ff20;
+}
+
+.back-btn {
+  margin: 22px 0 0 16px;
+  color: #57d0ff;
+  background: transparent;
+  border: none;
+  font-size: 1.0rem;
+  font-weight: bold;
+  cursor: pointer;
+  text-align: left;
+  display: inline-block;
+}
+.back-btn:hover {
+  text-decoration: underline;
+}
