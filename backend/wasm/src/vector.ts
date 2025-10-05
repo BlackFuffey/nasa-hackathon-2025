@@ -27,6 +27,14 @@ export function norm(a: Vec3): f64 { return Math.sqrt(dot(a,a)); }
 
 export function normalize(a: Vec3): Vec3 { let n = norm(a); return scale(a, 1.0/n); }
 
+export function cross(a: Vec3, b: Vec3): Vec3 {
+    return vec3(
+        a.y * b.z - a.z * b.y,
+        a.z * b.x - a.x * b.z,
+        a.x * b.y - a.y * b.x
+    );
+}
+
 // Matrix math helpers
 export function rotationMat(axis: Vec3, ang_rad: f64): Mat3x3 {
     axis = normalize(axis);
