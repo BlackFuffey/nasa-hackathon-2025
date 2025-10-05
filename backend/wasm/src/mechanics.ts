@@ -18,6 +18,19 @@ class KeplerToCartesianParams {
     mu!: f64;
     orbital!: KeplerOrbit;
 }
+
+// Rotation: Rz(Ω) * Rx(i) * Rz(ω)
+class Rotations {
+    R11!: f64;
+    R12!: f64;
+    R13!: f64;
+    R21!: f64;
+    R22!: f64;
+    R23!: f64;
+    R31!: f64;
+    R32!: f64;
+    R33!: f64;
+}
 export function keplerToCartesian(params: KeplerToCartesianParams): CartesianMechState {
     const a = params.orbital.axis_m;
     const e = params.orbital.ecc;
@@ -36,19 +49,6 @@ export function keplerToCartesian(params: KeplerToCartesianParams): CartesianMec
     const cosi = Math.cos(i), sini = Math.sin(i);
     const cosw = Math.cos(w), sinw = Math.sin(w);
 
-    // Rotation: Rz(Ω) * Rx(i) * Rz(ω)
-    
-    class Rotations {
-        R11!: f64;
-        R12!: f64;
-        R13!: f64;
-        R21!: f64;
-        R22!: f64;
-        R23!: f64;
-        R31!: f64;
-        R32!: f64;
-        R33!: f64;
-    }
 
     const rotVals: Rotations = {
 

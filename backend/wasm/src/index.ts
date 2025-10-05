@@ -137,9 +137,15 @@ function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<A
         for (let i = 0; i < params.shape.faces.length; i++) {
             const f = params.shape.faces[i];
             let countA = 0;
-            if (vA.includes(params.shape.vertices[f.x])) countA++;
-            if (vA.includes(params.shape.vertices[f.y])) countA++;
-            if (vA.includes(params.shape.vertices[f.z])) countA++;
+            const vx = params.shape.vertices[f.x];
+            const vy = params.shape.vertices[f.y];
+            const vz = params.shape.vertices[f.z];
+
+            for (let i = 0; i < vA.length; i++) {
+                if (vA[i].x === vx.x && vA[i].y === vx.y && vA[i].z === vx.z) countA++;
+                if (vA[i].x === vy.x && vA[i].y === vy.y && vA[i].z === vy.z) countA++;
+                if (vA[i].x === vz.x && vA[i].y === vz.y && vA[i].z === vz.z) countA++;
+            }
             if (countA >= 2) fA.push(f); else fB.push(f);
         }
 
@@ -193,7 +199,7 @@ function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<A
     }
 
     // ---- 5. Dynamics integration (RK4) ----
-    function accel(pos: Vec3, v: Vec3, m: f64): Vec3 {
+    function accel(planet: PlanetConsts, pos: Vec3, v: Vec3, m: f64): Vec3 {
         const geo = ecefToGeodetic({ pos, axis_m: planet.axis_m, ecc: planet.ecc, flat: planet.flat });
         const rho = airDensity(geo.alt);
         const vmag = norm(v);
@@ -206,16 +212,16 @@ function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<A
         return add(gravity, drag);
     }
 
-    const k1v = accel(params.pos, params.vel, params.mass_kg);
+    const k1v = accel(planet, params.pos, params.vel, params.mass_kg);
     const k1r = params.vel;
 
-    const k2v = accel(add(params.pos, scale(k1r, dt * 0.5)), add(params.vel, scale(k1v, dt * 0.5)), params.mass_kg);
+    const k2v = accel(planet, add(params.pos, scale(k1r, dt * 0.5)), add(params.vel, scale(k1v, dt * 0.5)), params.mass_kg);
     const k2r = add(params.vel, scale(k1v, dt * 0.5));
 
-    const k3v = accel(add(params.pos, scale(k2r, dt * 0.5)), add(params.vel, scale(k2v, dt * 0.5)), params.mass_kg);
+    const k3v = accel(planet, add(params.pos, scale(k2r, dt * 0.5)), add(params.vel, scale(k2v, dt * 0.5)), params.mass_kg);
     const k3r = add(params.vel, scale(k2v, dt * 0.5));
 
-    const k4v = accel(add(params.pos, scale(k3r, dt)), add(params.vel, scale(k3v, dt)), params.mass_kg);
+    const k4v = accel(planet, add(params.pos, scale(k3r, dt)), add(params.vel, scale(k3v, dt)), params.mass_kg);
     const k4r = add(params.vel, scale(k3v, dt));
 
     params.vel = add(params.vel, scale(add(add(k1v, scale(add(k2v, k3v), 2.0)), k4v), dt / 6.0));
@@ -272,7 +278,7 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
             frags.delete(keys[i]);
 
             for (let j = 0; j < result.length; j++) {
-                frags.set(result[i].id, result[i]);
+                frags.set(result[j].id, result[j]);
             }
         }
 
