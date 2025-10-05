@@ -203,6 +203,7 @@ function ecefToGeodetic(params: EcefToGeodeticParams): PlanetCordinates {
 class GravityAtParams {
     pos!: Vec3; eqtgrav_mS2!: f64; axis_m!: f64; ecc!: f64; flat!: f64;
 }
+
 function gravityAt(params: GravityAtParams): f64 {
     const lat = ecefToGeodetic({
         pos: params.pos, axis_m: params.axis_m,
@@ -215,6 +216,280 @@ function gravityAt(params: GravityAtParams): f64 {
 }
 
 // Main simulation
+let fragId = 0;
+function nextId(): i32 { return fragId++; }
+
+function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<Asteroid> {
+    let rmag = norm(params.pos);
+    let alt = (rmag - planet.radius) / 1000.0; // km altitude
+
+    if (alt < 0.0) return []; // ground impact
+    if (params.mass_kg < 1.0) return [];   // burned up
+
+    // Atmosphere
+    let rho = airDensity(alt);
+    let vmag = norm(params.vel);
+
+    // Mass loss
+    let massPrev = params.mass_kg;
+
+    let heatFlux = 0.5 * rho * vmag * vmag * vmag;
+    let dm = -heatFlux * 1e-8 * dt; // tuning coefficient
+
+    params.mass_kg = Math.max(0.0, params.mass_kg + dm);
+
+    // Fragmentation 
+    // O(sobbing terrible)
+    if (0.5 * rho * vmag * vmag > params.strength_MPa * 1e6) {
+
+        // --- 1. Compute aerodynamic stress direction (shock front) ---
+        let stressDir = vec3(0.0, 0.0, 0.0);
+        let maxStress = 0.0;
+        const vdir = normalize(params.vel);
+
+        for (let i = 0; i < params.shape.faces.length; i++) {
+            const f = params.shape.faces[i];
+            const a = params.shape.vertices[f.x];
+            const b = params.shape.vertices[f.y];
+            const c = params.shape.vertices[f.z];
+
+            // Face normal
+            const ab = sub(b, a);
+            const ac = sub(c, a);
+            const n = normalize(vec3(
+                ab.y * ac.z - ab.z * ac.y,
+                ab.z * ac.x - ab.x * ac.z,
+                ab.x * ac.y - ab.y * ac.x
+            ));
+
+            // Pressure-induced stress along local normal
+            const stress = 0.5 * rho * vmag * vmag * Math.max(0.0, dot(n, vdir));
+            if (stress > maxStress) {
+                maxStress = stress;
+                stressDir = n;
+            }
+        }
+
+        // --- 2. Define fracture plane through centroid ---
+        let cx = 0.0, cy = 0.0, cz = 0.0;
+        for (let i = 0; i < params.shape.vertices.length; i++) {
+            const v = params.shape.vertices[i];
+            cx += v.x; cy += v.y; cz += v.z;
+        }
+        const center = vec3(cx / params.shape.vertices.length, cy / params.shape.vertices.length, cz / params.shape.vertices.length);
+        const nfract = normalize(stressDir);
+
+        // --- 3. Split mesh into two fragments along the fracture plane ---
+        const vA: Vec3[] = [], vB: Vec3[] = [];
+        const fA: i32Vec3[] = [], fB: i32Vec3[] = [];
+
+        for (let i = 0; i < params.shape.vertices.length; i++) {
+            const v = params.shape.vertices[i];
+            const side = dot(sub(v, center), nfract);
+            if (side >= 0.0) vA.push(v);
+                else vB.push(v);
+        }
+
+        for (let i = 0; i < params.shape.faces.length; i++) {
+            const f = params.shape.faces[i];
+            let countA = 0;
+            if (vA.includes(params.shape.vertices[f.x])) countA++;
+            if (vA.includes(params.shape.vertices[f.y])) countA++;
+            if (vA.includes(params.shape.vertices[f.z])) countA++;
+            if (countA >= 2) fA.push(f);
+                else fB.push(f);
+        }
+
+        const mesh1: Mesh3D = {
+            vertices: StaticArray.fromArray(vA),
+            faces: StaticArray.fromArray(fA)
+        };
+        const mesh2: Mesh3D = {
+            vertices: StaticArray.fromArray(vB),
+            faces: StaticArray.fromArray(fB)
+        };
+
+        // --- 4. Rotation-aware fragmentation ---
+        const rotMatrix = rotationMat(params.spinAxis, params.rot_rad);
+
+        // Rotate fragment meshes into world orientation
+        for (let i = 0; i < mesh1.vertices.length; i++) { 
+            const v = mesh1.vertices[i];
+            const vr = rotVec(rotMatrix, v); 
+            v.x = vr.x; v.y = vr.y; v.z = vr.z; 
+        }
+        for (let i = 0; i < mesh2.vertices.length; i++) { 
+            const v = mesh2.vertices[i];
+            const vr = rotVec(rotMatrix, v); 
+            v.x = vr.x; v.y = vr.y; v.z = vr.z; 
+        }
+
+        const newSpinAxis = normalize(params.spinAxis);
+        const newRotRadS = params.rotr_radS;
+
+        // --- 5. Momentum-conserving separation ---
+        const mass1 = params.mass_kg * 0.5;
+        const mass2 = params.mass_kg * 0.5;
+        const sepVel = scale(nfract, vmag * 0.02);
+
+        // --- 6. Fill fracture surface ---
+        const eps = 1e-6;
+        const fractureVerts: Vec3[] = [];
+        for (let i = 0; i < params.shape.vertices.length; i++) {
+            const v = params.shape.vertices[i];
+            const dist = dot(sub(v, center), nfract);
+            if (Math.abs(dist) < eps * 100.0) {
+                fractureVerts.push(v);
+            }
+        }
+
+        let fx = 0.0, fy = 0.0, fz = 0.0;
+        for (let i = 0; i < fractureVerts.length; i++) {
+            const v = fractureVerts[i];
+            fx += v.x; fy += v.y; fz += v.z;
+        }
+        const fcenter = vec3(fx / fractureVerts.length, fy / fractureVerts.length, fz / fractureVerts.length);
+
+        function hashNoise(v: Vec3): f64 {
+            const s = Math.sin(dot(v, vec3(12.9898, 78.233, 45.164)) * 43758.5453);
+            return s - Math.floor(s);
+        }
+
+        const offsetMag = norm(sub(fcenter, center)) * 0.01;
+        const fractureInnerA: Vec3[] = [];
+        const fractureInnerB: Vec3[] = [];
+        for (let i = 0; i < fractureVerts.length; i++) {
+            const v = fractureVerts[i];
+            const n = hashNoise(v);
+            const offset = scale(nfract, (n - 0.5) * offsetMag);
+            fractureInnerA.push(add(v, offset));
+            fractureInnerB.push(sub(v, offset));
+        }
+
+        const fTriA: i32Vec3[] = [];
+        const fTriB: i32Vec3[] = [];
+        for (let i = 0; i < fractureVerts.length; i++) {
+            const i1 = i;
+            const i2 = (i + 1) % fractureVerts.length;
+            fTriA.push({ x: i1, y: i2, z: fractureVerts.length + i1 });
+            fTriB.push({ x: i1, y: i2, z: fractureVerts.length + i1 });
+        }
+
+        for (let i = 0; i < fractureInnerA.length; i++) vA.push(fractureInnerA[i]);
+        for (let i = 0; i < fractureInnerB.length; i++) vB.push(fractureInnerB[i]);
+        for (let i = 0; i < fTriA.length; i++) fA.push(fTriA[i]);
+        for (let i = 0; i < fTriB.length; i++) fB.push(fTriB[i]);
+
+        const frag1: StaticArray<Asteroid> = compute({
+            id: nextId(),
+            rot_rad: 0.0,
+            mass_kg: mass1,
+            pos: params.pos,
+            vel: add(params.vel, sepVel),
+            shape: mesh1,
+            spinAxis: newSpinAxis,
+            rotr_radS: newRotRadS,
+            strength_MPa: params.strength_MPa
+        }, planet, dt);
+
+        const frag2: StaticArray<Asteroid> = compute({
+            id: nextId(),
+            rot_rad: 0.0,
+            mass_kg: mass2,
+            pos: params.pos,
+            vel: sub(params.vel, sepVel),
+            shape: mesh2,
+            spinAxis: newSpinAxis,
+            rotr_radS: newRotRadS,
+            strength_MPa: params.strength_MPa
+        }, planet, dt);
+
+        const result = new StaticArray<Asteroid>(frag1.length + frag2.length);
+
+        for (let i = 0; i < frag1.length; i++) {
+            result[i] = frag1[i];
+        }
+
+        for (let i = 0; i < frag2.length; i++) {
+            result[frag1.length + 1] = frag2[i];
+        }
+
+        return result;
+    }
+
+    // Adjust params.shape (account for rotation)
+    const dir = normalize(params.vel);
+
+    // Build rotation matrix around spin axis
+    const R = rotationMat(params.spinAxis, params.rot_rad);
+    const Rinv = rotationMat(params.spinAxis, -params.rot_rad);
+
+    for (let i = 0; i < params.shape.vertices.length; i++) {
+        let v = params.shape.vertices[i];
+
+        // Transform vertex to world orientation
+        v = rotVec(R, v);
+
+        // Apply erosion bias in world frame
+        const bias = 1.0 - 0.05 * dot(normalize(v), dir); // leading side erodes faster
+        const scaleFactor = Math.pow(params.mass_kg / massPrev, 1.0 / 3.0) * bias;
+
+        v = scale(v, scaleFactor);
+
+        // Transform back to local params.shape frame
+        params.shape.vertices[i] = rotVec(Rinv, v);
+    }
+
+    // runge-kutta 4th order integration
+
+    // Local acceleration
+    function accel(planet: PlanetConsts, pos: Vec3, p: Vec3, v: Vec3, m: f64): Vec3 {
+        let alt = ecefToGeodetic({
+            pos, 
+            axis_m: planet.axis_m, 
+            ecc: planet.ecc, 
+            flat: planet.flat
+        }).alt;
+        let rho = airDensity(alt);
+        let vmag = norm(v);
+
+        // Drag and gravity
+        let Fd = 0.5 * CD * rho * vmag * vmag * Math.pow(m / 2000.0, 2/3);
+        let drag = scale(normalize(v), -Fd / m);
+        let gravity = scale(normalize(p), -gravityAt({
+            pos: p, eqtgrav_mS2: planet.eqtgrav_mS2,
+            axis_m: planet.axis_m, 
+            ecc: planet.ecc, flat: planet.flat
+        }))
+
+        return add(gravity, drag);
+    }
+
+    let k1v = accel(planet, params.pos, params.pos, params.vel, params.mass_kg);
+    let k1r = params.vel;
+
+    let k2v = accel(planet, params.pos, add(params.pos, scale(k1r, dt * 0.5)), add(params.vel, scale(k1v, dt * 0.5)), params.mass_kg);
+    let k2r = add(params.vel, scale(k1v, dt * 0.5));
+
+    let k3v = accel(planet, params.pos, add(params.pos, scale(k2r, dt * 0.5)), add(params.vel, scale(k2v, dt * 0.5)), params.mass_kg);
+    let k3r = add(params.vel, scale(k2v, dt * 0.5));
+
+    let k4v = accel(planet, params.pos, add(params.pos, scale(k3r, dt)), add(params.vel, scale(k3v, dt)), params.mass_kg);
+    let k4r = add(params.vel, scale(k3v, dt));
+
+    params.vel = add(params.vel, scale(
+        add(add(k1v, scale(add(k2v, k3v), 2.0)), k4v), dt / 6.0
+    ));
+    params.pos = add(params.pos, scale(
+        add(add(k1r, scale(add(k2r, k3r), 2.0)), k4r), dt / 6.0
+    ));
+
+    // Rotation update
+    params.rot_rad += params.rotr_radS * dt;
+    if (params.rot_rad > 2.0*Math.PI) params.rot_rad -= 2.0*Math.PI;
+
+    return [params];
+}
 class MeteorsimParams {
     planet!: PlanetConsts;
     orbital!: KeplerOrbit;
@@ -222,7 +497,6 @@ class MeteorsimParams {
     resol_ms!: i32;
 }
 
-let fragId = 0;
 export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     const dt = params.resol_ms as f64 / 1000.0; // timestep in seconds
@@ -230,7 +504,6 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     let movement = keplerToCartesian({ mu: params.planet.mu, orbital: params.orbital });
 
-    function nextId(): i32 { return fragId++; }
 
     const frags = new Map<i32, Asteroid>();
     frags.set(0, {
@@ -251,277 +524,6 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     let results = new Array<SimulationFrame>();
 
-    function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<Asteroid> {
-        let rmag = norm(params.pos);
-        let alt = (rmag - planet.radius) / 1000.0; // km altitude
-
-        if (alt < 0.0) return []; // ground impact
-        if (params.mass_kg < 1.0) return [];   // burned up
-
-        // Atmosphere
-        let rho = airDensity(alt);
-        let vmag = norm(params.vel);
-
-        // Mass loss
-        let massPrev = params.mass_kg;
-
-        let heatFlux = 0.5 * rho * vmag * vmag * vmag;
-        let dm = -heatFlux * 1e-8 * dt; // tuning coefficient
-
-        params.mass_kg = Math.max(0.0, params.mass_kg + dm);
-
-        // Fragmentation 
-        // O(sobbing terrible)
-        if (0.5 * rho * vmag * vmag > params.strength_MPa * 1e6) {
-
-            // --- 1. Compute aerodynamic stress direction (shock front) ---
-            let stressDir = vec3(0.0, 0.0, 0.0);
-            let maxStress = 0.0;
-            const vdir = normalize(params.vel);
-
-            for (let i = 0; i < params.shape.faces.length; i++) {
-                const f = params.shape.faces[i];
-                const a = params.shape.vertices[f.x];
-                const b = params.shape.vertices[f.y];
-                const c = params.shape.vertices[f.z];
-
-                // Face normal
-                const ab = sub(b, a);
-                const ac = sub(c, a);
-                const n = normalize(vec3(
-                    ab.y * ac.z - ab.z * ac.y,
-                    ab.z * ac.x - ab.x * ac.z,
-                    ab.x * ac.y - ab.y * ac.x
-                ));
-
-                // Pressure-induced stress along local normal
-                const stress = 0.5 * rho * vmag * vmag * Math.max(0.0, dot(n, vdir));
-                if (stress > maxStress) {
-                    maxStress = stress;
-                    stressDir = n;
-                }
-            }
-
-            // --- 2. Define fracture plane through centroid ---
-            let cx = 0.0, cy = 0.0, cz = 0.0;
-            for (let i = 0; i < params.shape.vertices.length; i++) {
-                const v = params.shape.vertices[i];
-                cx += v.x; cy += v.y; cz += v.z;
-            }
-            const center = vec3(cx / params.shape.vertices.length, cy / params.shape.vertices.length, cz / params.shape.vertices.length);
-            const nfract = normalize(stressDir);
-
-            // --- 3. Split mesh into two fragments along the fracture plane ---
-            const vA: Vec3[] = [], vB: Vec3[] = [];
-            const fA: i32Vec3[] = [], fB: i32Vec3[] = [];
-
-            for (let i = 0; i < params.shape.vertices.length; i++) {
-                const v = params.shape.vertices[i];
-                const side = dot(sub(v, center), nfract);
-                if (side >= 0.0) vA.push(v);
-                    else vB.push(v);
-            }
-
-            for (let i = 0; i < params.shape.faces.length; i++) {
-                const f = params.shape.faces[i];
-                let countA = 0;
-                if (vA.includes(params.shape.vertices[f.x])) countA++;
-                if (vA.includes(params.shape.vertices[f.y])) countA++;
-                if (vA.includes(params.shape.vertices[f.z])) countA++;
-                if (countA >= 2) fA.push(f);
-                    else fB.push(f);
-            }
-
-            const mesh1: Mesh3D = {
-                vertices: StaticArray.fromArray(vA),
-                faces: StaticArray.fromArray(fA)
-            };
-            const mesh2: Mesh3D = {
-                vertices: StaticArray.fromArray(vB),
-                faces: StaticArray.fromArray(fB)
-            };
-
-            // --- 4. Rotation-aware fragmentation ---
-            const rotMatrix = rotationMat(params.spinAxis, params.rot_rad);
-
-            // Rotate fragment meshes into world orientation
-            for (let i = 0; i < mesh1.vertices.length; i++) { 
-                const v = mesh1.vertices[i];
-                const vr = rotVec(rotMatrix, v); 
-                v.x = vr.x; v.y = vr.y; v.z = vr.z; 
-            }
-            for (let i = 0; i < mesh2.vertices.length; i++) { 
-                const v = mesh2.vertices[i];
-                const vr = rotVec(rotMatrix, v); 
-                v.x = vr.x; v.y = vr.y; v.z = vr.z; 
-            }
-
-            const newSpinAxis = normalize(params.spinAxis);
-            const newRotRadS = params.rotr_radS;
-
-            // --- 5. Momentum-conserving separation ---
-            const mass1 = params.mass_kg * 0.5;
-            const mass2 = params.mass_kg * 0.5;
-            const sepVel = scale(nfract, vmag * 0.02);
-
-            // --- 6. Fill fracture surface ---
-            const eps = 1e-6;
-            const fractureVerts: Vec3[] = [];
-            for (let i = 0; i < params.shape.vertices.length; i++) {
-                const v = params.shape.vertices[i];
-                const dist = dot(sub(v, center), nfract);
-                if (Math.abs(dist) < eps * 100.0) {
-                    fractureVerts.push(v);
-                }
-            }
-
-            let fx = 0.0, fy = 0.0, fz = 0.0;
-            for (let i = 0; i < fractureVerts.length; i++) {
-                const v = fractureVerts[i];
-                fx += v.x; fy += v.y; fz += v.z;
-            }
-            const fcenter = vec3(fx / fractureVerts.length, fy / fractureVerts.length, fz / fractureVerts.length);
-
-            function hashNoise(v: Vec3): f64 {
-                const s = Math.sin(dot(v, vec3(12.9898, 78.233, 45.164)) * 43758.5453);
-                return s - Math.floor(s);
-            }
-
-            const offsetMag = norm(sub(fcenter, center)) * 0.01;
-            const fractureInnerA: Vec3[] = [];
-            const fractureInnerB: Vec3[] = [];
-            for (let i = 0; i < fractureVerts.length; i++) {
-                const v = fractureVerts[i];
-                const n = hashNoise(v);
-                const offset = scale(nfract, (n - 0.5) * offsetMag);
-                fractureInnerA.push(add(v, offset));
-                fractureInnerB.push(sub(v, offset));
-            }
-
-            const fTriA: i32Vec3[] = [];
-            const fTriB: i32Vec3[] = [];
-            for (let i = 0; i < fractureVerts.length; i++) {
-                const i1 = i;
-                const i2 = (i + 1) % fractureVerts.length;
-                fTriA.push({ x: i1, y: i2, z: fractureVerts.length + i1 });
-                fTriB.push({ x: i1, y: i2, z: fractureVerts.length + i1 });
-            }
-
-            for (let i = 0; i < fractureInnerA.length; i++) vA.push(fractureInnerA[i]);
-            for (let i = 0; i < fractureInnerB.length; i++) vB.push(fractureInnerB[i]);
-            for (let i = 0; i < fTriA.length; i++) fA.push(fTriA[i]);
-            for (let i = 0; i < fTriB.length; i++) fB.push(fTriB[i]);
-
-            const frag1: StaticArray<Asteroid> = compute({
-                id: nextId(),
-                rot_rad: 0.0,
-                mass_kg: mass1,
-                pos: params.pos,
-                vel: add(params.vel, sepVel),
-                shape: mesh1,
-                spinAxis: newSpinAxis,
-                rotr_radS: newRotRadS,
-                strength_MPa: params.strength_MPa
-            }, planet, dt);
-            
-            const frag2: StaticArray<Asteroid> = compute({
-                id: nextId(),
-                rot_rad: 0.0,
-                mass_kg: mass2,
-                pos: params.pos,
-                vel: sub(params.vel, sepVel),
-                shape: mesh2,
-                spinAxis: newSpinAxis,
-                rotr_radS: newRotRadS,
-                strength_MPa: params.strength_MPa
-            }, planet, dt);
-
-            const result = new StaticArray<Asteroid>(frag1.length + frag2.length);
-
-            for (let i = 0; i < frag1.length; i++) {
-                result[i] = frag1[i];
-            }
-
-            for (let i = 0; i < frag2.length; i++) {
-                result[frag1.length + 1] = frag2[i];
-            }
-
-            return result;
-        }
-
-        // Adjust params.shape (account for rotation)
-        const dir = normalize(params.vel);
-
-        // Build rotation matrix around spin axis
-        const R = rotationMat(params.spinAxis, params.rot_rad);
-        const Rinv = rotationMat(params.spinAxis, -params.rot_rad);
-
-        for (let i = 0; i < params.shape.vertices.length; i++) {
-            let v = params.shape.vertices[i];
-
-            // Transform vertex to world orientation
-            v = rotVec(R, v);
-
-            // Apply erosion bias in world frame
-            const bias = 1.0 - 0.05 * dot(normalize(v), dir); // leading side erodes faster
-            const scaleFactor = Math.pow(params.mass_kg / massPrev, 1.0 / 3.0) * bias;
-
-            v = scale(v, scaleFactor);
-
-            // Transform back to local params.shape frame
-            params.shape.vertices[i] = rotVec(Rinv, v);
-        }
-
-        // runge-kutta 4th order integration
-        
-        // Local acceleration
-        function accel(planet: PlanetConsts, pos: Vec3, p: Vec3, v: Vec3, m: f64): Vec3 {
-            let alt = ecefToGeodetic({
-                pos, 
-                axis_m: planet.axis_m, 
-                ecc: planet.ecc, 
-                flat: planet.flat
-            }).alt;
-            let rho = airDensity(alt);
-            let vmag = norm(v);
-
-            // Drag and gravity
-            let Fd = 0.5 * CD * rho * vmag * vmag * Math.pow(m / 2000.0, 2/3);
-            let drag = scale(normalize(v), -Fd / m);
-            let gravity = scale(normalize(p), -gravityAt({
-                pos: p, eqtgrav_mS2: planet.eqtgrav_mS2,
-                axis_m: planet.axis_m, 
-                ecc: planet.ecc, flat: planet.flat
-            }))
-
-            return add(gravity, drag);
-        }
-
-        let k1v = accel(planet, params.pos, params.pos, params.vel, params.mass_kg);
-        let k1r = params.vel;
-
-        let k2v = accel(planet, params.pos, add(params.pos, scale(k1r, dt * 0.5)), add(params.vel, scale(k1v, dt * 0.5)), params.mass_kg);
-        let k2r = add(params.vel, scale(k1v, dt * 0.5));
-
-        let k3v = accel(planet, params.pos, add(params.pos, scale(k2r, dt * 0.5)), add(params.vel, scale(k2v, dt * 0.5)), params.mass_kg);
-        let k3r = add(params.vel, scale(k2v, dt * 0.5));
-
-        let k4v = accel(planet, params.pos, add(params.pos, scale(k3r, dt)), add(params.vel, scale(k3v, dt)), params.mass_kg);
-        let k4r = add(params.vel, scale(k3v, dt));
-
-        params.vel = add(params.vel, scale(
-            add(add(k1v, scale(add(k2v, k3v), 2.0)), k4v), dt / 6.0
-        ));
-        params.pos = add(params.pos, scale(
-            add(add(k1r, scale(add(k2r, k3r), 2.0)), k4r), dt / 6.0
-        ));
-
-        // Rotation update
-        params.rot_rad += params.rotr_radS * dt;
-        if (params.rot_rad > 2.0*Math.PI) params.rot_rad -= 2.0*Math.PI;
-
-        return [params];
-    }
 
     // Integrate until hit ground or burn-up
     for (let step = 0; step < 200000; step++) {

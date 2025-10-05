@@ -5,8 +5,8 @@
     "private": true,
     "main": "build/app.js",
     "scripts": {
-        "build:wasmdev": "asc wasm/src/index.ts -b .tmp/module.wasm -t .tmp/module.wat -O0 --shrinkLevel 0 --debug",
-        "build:wasm": "asc wasm/src/index.ts -b build/module.wasm -O3",
+        "build:wasmdev": "asc wasm/src/index.ts -o .tmp/module.wasm -t .tmp/module.wat -O0 --shrinkLevel 0 --debug",
+        "build:wasm": "asc wasm/src/index.ts -o build/module.wasm -O3",
         "build:ts": "node build.js",
         "build": "concurrently \"npm run build:wasm\" \"npm run build:ts\"",
         "dev": "concurrently \"chokidar 'wasm_src/**/*.ts' -c 'npm run build:wasmdev'\" \"tsx watch --watch .tmp/module.wasm src/index.ts\""
