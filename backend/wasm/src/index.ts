@@ -178,7 +178,7 @@ function gravityAt(params: {
 
     return params.eqtgrav_mS2 * 
         (1 + 0.0053024*Math.sin(lat)**2 - 0.0000058*Math.sin(2*lat)**2
-    );
+        );
 }
 
 // Main simulation
@@ -227,7 +227,7 @@ export function meteorsim(params: {
 
     // runge-kutta 4th order integration
     function rk4Step(pos: Vec3, vel: Vec3, m: f64, dt: f64): { pos: Vec3, vel: Vec3 } {
-        
+
         // Local acceleration
         function accel(p: Vec3, v: Vec3, m: f64): Vec3 {
             let rmag = norm(p);
@@ -454,17 +454,51 @@ export function meteorsim(params: {
                 }
             ];
         }
-        // ---------------------------------------------------------------------------
 
-        // Integrate until hit ground or burn-up
-        for (let step = 0; step < 200000; step++) {
-        
+        // Adjust shape (account for rotation)
+        const dir = normalize(vel);
+
+        // Build rotation matrix around spin axis
+        const R = rotationMat(spinAxis, rot_rad);
+        const Rinv = rotationMat(spinAxis, -rot_rad);
+
+        for (let i = 0; i < shape.vertices.length; i++) {
+            let v = shape.vertices[i];
+
+            // Transform vertex to world orientation
+            v = rotVec(R, v);
+
+            // Apply erosion bias in world frame
+            const bias = 1.0 - 0.05 * dot(normalize(v), dir); // leading side erodes faster
+            const scaleFactor = Math.pow(mass_kg / massPrev, 1.0 / 3.0) * bias;
+
+            v = scale(v, scaleFactor);
+
+            // Transform back to local shape frame
+            shape.vertices[i] = rotVec(Rinv, v);
+        }
+
+        // Integrate
+        const integ = rk4Step(pos, vel, mass_kg, dt);
+        vel = integ.vel;
+        pos = integ.pos;
+
+        // Rotation update
+        rot_rad += rotr_radS * dt;
+        if (rot_rad > 2.0*Math.PI) rot_rad -= 2.0*Math.PI;
+
+        return [{ id, rot_rad, mass_kg, pos, vel, shape, spinAxis, rotr_radS }];
+    }
+
+    // Integrate until hit ground or burn-up
+    for (let step = 0; step < 200000; step++) {
+
         frags.keys().forEach(key => {
             let result = compute(frags.get(key), dt)
             frags.delete(key);
             result.forEach(frag => frags.set(frag.id, frag));
         })
-        
+
         results.push({
             t_ms: (t * 1000) as i32,
             state: frags.keys().map(key => {
