@@ -9,7 +9,7 @@
         "build:wasm": "asc wasm/src/index.ts -b build/module.wasm -O3",
         "build:ts": "node build.js",
         "build": "concurrently \"npm run build:wasm\" \"npm run build:ts\"",
-        "dev": "concurrently \"chokidar 'wasm/src/**/*.ts' -c 'npm run build:wasmdev'\" \"tsx watch --watch .tmp/module.wasm src/index.ts\""
+        "dev": "concurrently \"chokidar 'wasm/src/**/*.ts' -c 'npm run build:wasmdev'\" \"tsx watch ts/src/index.ts --watch .tmp/module.wasm \""
     },
 
     "keywords": [],

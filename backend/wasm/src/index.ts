@@ -1,26 +1,23 @@
-// Types
+import { 
+    Vec3,
+    vec3, add, sub, scale, dot, norm, normalize,
+    rotationMat, rotVec
+} from './vector'
 
-class Vec3 { 
-    x!: f64;
-    y!: f64;
-    z!: f64;
+import {
+    ecefToGeodetic, gravityAt
+} from './geography'
+
+// Types
+class Mesh3D {
+    vertices!: StaticArray<Vec3>;
+    faces!: StaticArray<i32Vec3>;
 }
 
 class i32Vec3 { 
     x!: i32;
     y!: i32;
     z!: i32;
-}
-
-class Mat3x3 {
-    a!: Vec3;
-    b!: Vec3;
-    c!: Vec3;
-}
-
-class Mesh3D {
-    vertices!: StaticArray<Vec3>;
-    faces!: StaticArray<i32Vec3>;
 }
 
 class FragmentState {
@@ -62,61 +59,8 @@ class KeplerOrbit {
     mean_rad!: f64
 }
 
-class PlanetCordinates {
-    lat!: f64; lon!: f64; alt!: f64
-}
-
 class CartesianParams {
     pos!: Vec3; vel!: Vec3
-}
-
-// Vector Math Helpers
-function vec3(x: f64, y: f64, z: f64): Vec3 { return { x, y, z }; }
-
-function add(a: Vec3, b: Vec3): Vec3 { return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }; }
-
-function sub(a: Vec3, b: Vec3): Vec3 { return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }; }
-
-function scale(a: Vec3, s: f64): Vec3 { return { x: a.x * s, y: a.y * s, z: a.z * s }; }
-
-function dot(a: Vec3, b: Vec3): f64 { return a.x*b.x + a.y*b.y + a.z*b.z; }
-
-function norm(a: Vec3): f64 { return Math.sqrt(dot(a,a)); }
-
-function normalize(a: Vec3): Vec3 { let n = norm(a); return scale(a, 1.0/n); }
-
-// Matrix math helpers
-function rotationMat(axis: Vec3, ang_rad: f64): Mat3x3 {
-    axis = normalize(axis);
-    const c = Math.cos(ang_rad);
-    const s = Math.sin(ang_rad);
-    const t = 1 - c;
-
-    return {
-        a: {
-            x: t*axis.x*axis.x + c,
-            y: t*axis.x*axis.y - s*axis.z,
-            z: t*axis.x*axis.z + s*axis.y
-        },
-        b: {
-            x: t*axis.x*axis.y + s*axis.z,  
-            y: t*axis.y*axis.y + c,         
-            z: t*axis.y*axis.z - s*axis.x 
-        },
-        c: {
-            x: t*axis.x*axis.z - s*axis.y, 
-            y: t*axis.y*axis.z + s*axis.x, 
-            z: t*axis.z*axis.z + c  
-        },
-    };
-}
-
-function rotVec(M: Mat3x3, v: Vec3): Vec3 {
-    return vec3(
-        M.a.x*v.x + M.a.y*v.y + M.a.z*v.z,
-        M.b.x*v.x + M.b.y*v.y + M.b.z*v.z,
-        M.c.x*v.x + M.c.y*v.y + M.c.z*v.z
-    );
 }
 
 // Placeholder exponential atmosphere (replace with NRLMSISE-00)
@@ -176,43 +120,6 @@ function keplerToCartesian(params: KeplerToCartesian): CartesianParams {
     }
 
     return { pos: rot(r_orb), vel: rot(v_orb) };
-}
-
-// Bowring itration for ECEF -> Geodetic conversion
-class EcefToGeodeticParams {
-    pos!: Vec3; axis_m!: f64; ecc!: f64; flat!: f64;
-}
-function ecefToGeodetic(params: EcefToGeodeticParams): PlanetCordinates {
-    const ecc2 = params.ecc ** 2;
-
-    const x = params.pos.x, y = params.pos.y, z = params.pos.z;
-    const lon = Math.atan2(y, x);
-    const r = Math.sqrt(x*x + y*y);
-    const b = params.axis_m * (1.0 - params.flat);
-    const ep2 = (params.axis_m*params.axis_m - b*b)/(b*b);
-    let lat = Math.atan2(z, r * (1 - ecc2));
-    let N: f64 = 0;
-    for (let i=0; i<5; i++) {
-        N = params.axis_m / Math.sqrt(1 - ecc2 * Math.sin(lat)*Math.sin(lat));
-        lat = Math.atan2(z + ep2*N*Math.sin(lat), r);
-    }
-    const h = r / Math.cos(lat) - N;
-    return { lat, lon, alt: h };
-}
-
-class GravityAtParams {
-    pos!: Vec3; eqtgrav_mS2!: f64; axis_m!: f64; ecc!: f64; flat!: f64;
-}
-
-function gravityAt(params: GravityAtParams): f64 {
-    const lat = ecefToGeodetic({
-        pos: params.pos, axis_m: params.axis_m,
-        ecc: params.ecc, flat: params.flat
-    }).lat;
-
-    return params.eqtgrav_mS2 * 
-        (1 + 0.0053024*Math.sin(lat)**2 - 0.0000058*Math.sin(2*lat)**2
-        );
 }
 
 // Main simulation
