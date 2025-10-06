@@ -233,13 +233,90 @@ function compute(params: Asteroid, planet: PlanetConsts, dt: f64): StaticArray<A
 
     return [params];
 }
+
+/**
+ * Compute impact effects given impact parameters and ground material.
+ * 
+ * All units are SI (m, kg, s, Pa, J).
+ */
+export function impactEffect(params: {
+    // Asteroid / fragment properties
+    mass_kg: f64,
+    vel_mps: f64,
+    density_kgm3: f64,
+    incidence_rad: f64,     // angle from vertical (0 = vertical)
+
+    // Ground / planetary properties
+    groundDensity_kgm3: f64,
+    groundStrength_Pa: f64,  // compressive/tensile strength
+    groundMelting_Jkg: f64,  // latent heat + sensible
+    gravity_mps2: f64,
+
+    // Impact geometry
+    altitude_m: f64,         // local elevation (optional, for gravity scaling)
+    surfaceSlope_rad: f64    // local slope angle
+}) {
+
+    // --- 1. Kinetic energy ---
+    const E = 0.5 * params.mass_kg * params.vel_mps * params.vel_mps;
+
+    // --- 2. Vertical velocity component ---
+    const v_vert = params.vel_mps * Math.cos(params.incidence_rad);
+
+    // --- 3. Effective impact energy accounting for obliquity and slope ---
+    const obliq_eff = Math.pow(Math.cos(params.incidence_rad - params.surfaceSlope_rad), 1.3);
+    const E_eff = E * Math.max(0.0, obliq_eff);
+
+    // --- 4. Scaling-law crater diameter (Holsapple-Schmidt form, generalized) ---
+    // Non-dimensional parameters
+    const π2 = params.groundStrength_Pa / (params.groundDensity_kgm3 * v_vert * v_vert);
+
+    // Empirical constants for strength/gravity transition (dimensionless form)
+    const K1 = 1.6;   // scaling coefficient
+    const μ = 0.55;   // material coupling exponent
+    const ν = 0.4;    // gravity dependence exponent
+
+    // Characteristic length scale
+    const a = Math.pow((3 * params.mass_kg) / (4 * Math.PI * params.density_kgm3), 1 / 3);
+
+    // Gravity-scaled crater diameter
+    const term_strength = Math.pow(π2, -μ / (2 + μ));
+    const term_gravity = Math.pow((params.gravity_mps2 * a / (v_vert * v_vert)), -ν / (2 + μ));
+    const D = K1 * a * term_strength * term_gravity; // final transient crater diameter (m)
+
+    // --- 5. Crater depth approximation ---
+    const depth = 0.2 * D; // typical ratio
+
+    // --- 6. Shockwave propagation (blast scaling) ---
+    // Characteristic blast overpressure radius (scaled by cube root of energy)
+    const R_shock = Math.pow(E_eff / (params.groundStrength_Pa * 4.0 / 3.0 * Math.PI), 1.0 / 3.0);
+
+    // Approximate peak overpressure near rim (Pa)
+    const P_peak = params.groundStrength_Pa * (1 + 2.5 * Math.pow(E_eff / (params.groundStrength_Pa * D * D * D), 1/3));
+
+    // --- 7. Melt / vaporization ---
+    const massMelted = Math.min(params.mass_kg, E_eff / params.groundMelting_Jkg);
+    const volumeMelt = massMelted / params.groundDensity_kgm3;
+    const meltRadius = Math.pow((3 * volumeMelt) / (4 * Math.PI), 1 / 3);
+
+    // --- 8. Output ---
+    return {
+        energy_J: E_eff,
+        craterDiameter_m: D,
+        craterDepth_m: depth,
+        shockRadius_m: R_shock,
+        peakOverpressure_Pa: P_peak,
+        meltRadius_m: meltRadius,
+        meltedMass_kg: massMelted
+    };
+}
+
 class MeteorsimParams {
     planet!: PlanetConsts;
     orbital!: KeplerOrbit;
     asteroid!: AsteroidInitial;
     resol_ms!: i32;
 }
-
 export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
 
     const dt = params.resol_ms as f64 / 1000.0; // timestep in seconds
@@ -265,7 +342,6 @@ export function meteorsim(params: MeteorsimParams): Array<SimulationFrame> {
     let t: f64 = 0.0;
 
     let results = new Array<SimulationFrame>();
-
 
     // Integrate until hit ground or burn-up
     for (let step = 0; step < 200000; step++) {
